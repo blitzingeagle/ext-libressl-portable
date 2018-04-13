@@ -1,7 +1,7 @@
 Official repository is development, not release versions of LibreSSL, and needs external applications to prepare for
 build.
 
-Built from https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.6.4.tar.gz
+Built from https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.7.2.tar.gz
 
 Modifications:
 - Removed tests/mandocs/pkgconfig/scripts/apps/cmake_uninstall from both filesystem and CMakeLists.txt
