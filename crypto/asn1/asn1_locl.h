@@ -1,4 +1,4 @@
-/* $OpenBSD: asn1_locl.h,v 1.10 2017/08/27 01:39:26 beck Exp $ */
+/* $OpenBSD: asn1_locl.h,v 1.12 2019/10/24 16:36:10 jsing Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 2006.
  */
@@ -60,6 +60,9 @@ __BEGIN_HIDDEN_DECLS
 
 /* Internal ASN1 structures and functions: not for application use */
 
+ASN1_TYPE *ASN1_TYPE_pack_sequence(const ASN1_ITEM *it, void *s, ASN1_TYPE **t);
+void *ASN1_TYPE_unpack_sequence(const ASN1_ITEM *it, const ASN1_TYPE *t);
+
 /* ASN1 print context structure */
 
 struct asn1_pctx_st {
@@ -86,7 +89,7 @@ struct evp_pkey_asn1_method_st {
 	int (*pub_print)(BIO *out, const EVP_PKEY *pkey, int indent,
 	    ASN1_PCTX *pctx);
 
-	int (*priv_decode)(EVP_PKEY *pk, PKCS8_PRIV_KEY_INFO *p8inf);
+	int (*priv_decode)(EVP_PKEY *pk, const PKCS8_PRIV_KEY_INFO *p8inf);
 	int (*priv_encode)(PKCS8_PRIV_KEY_INFO *p8, const EVP_PKEY *pk);
 	int (*priv_print)(BIO *out, const EVP_PKEY *pkey, int indent,
 	    ASN1_PCTX *pctx);

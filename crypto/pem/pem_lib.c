@@ -1,4 +1,4 @@
-/* $OpenBSD: pem_lib.c,v 1.45 2017/05/02 03:59:44 deraadt Exp $ */
+/* $OpenBSD: pem_lib.c,v 1.49 2019/09/06 17:41:05 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -227,8 +227,7 @@ check_pem(const char *nm, const char *name)
 				else
 					r = 0;
 #ifndef OPENSSL_NO_ENGINE
-				if (e)
-					ENGINE_finish(e);
+				ENGINE_finish(e);
 #endif
 				return r;
 			}
@@ -264,6 +263,16 @@ check_pem(const char *nm, const char *name)
 	    !strcmp(name, PEM_STRING_PKCS7))
 		return 1;
 
+#ifndef OPENSSL_NO_CMS
+	if (strcmp(nm, PEM_STRING_X509) == 0 &&
+	    strcmp(name, PEM_STRING_CMS) == 0)
+		return 1;
+
+	/* Allow CMS to be read from PKCS#7 headers */
+	if (strcmp(nm, PEM_STRING_PKCS7) == 0 &&
+	    strcmp(name, PEM_STRING_CMS) == 0)
+		return 1;
+#endif
 
 	return 0;
 }
@@ -565,7 +574,8 @@ load_iv(char **fromp, unsigned char *to, int num)
 }
 
 int
-PEM_write(FILE *fp, char *name, char *header, unsigned char *data, long len)
+PEM_write(FILE *fp, const char *name, const char *header,
+    const unsigned char *data, long len)
 {
 	BIO *b;
 	int ret;
@@ -581,8 +591,8 @@ PEM_write(FILE *fp, char *name, char *header, unsigned char *data, long len)
 }
 
 int
-PEM_write_bio(BIO *bp, const char *name, char *header, unsigned char *data,
-    long len)
+PEM_write_bio(BIO *bp, const char *name, const char *header,
+    const unsigned char *data, long len)
 {
 	int nlen, n, i, j, outl;
 	unsigned char *buf = NULL;
@@ -613,7 +623,8 @@ PEM_write_bio(BIO *bp, const char *name, char *header, unsigned char *data,
 	i = j = 0;
 	while (len > 0) {
 		n = (int)((len > (PEM_BUFSIZE * 5)) ? (PEM_BUFSIZE * 5) : len);
-		EVP_EncodeUpdate(&ctx, buf, &outl, &(data[j]), n);
+		if (!EVP_EncodeUpdate(&ctx, buf, &outl, &(data[j]), n))
+			goto err;
 		if ((outl) && (BIO_write(bp, (char *)buf, outl) != outl))
 			goto err;
 		i += outl;

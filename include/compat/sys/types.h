@@ -49,6 +49,14 @@ typedef SSIZE_T ssize_t;
 # define __bounded__(x, y, z)
 #endif
 
+#if !defined(HAVE_ATTRIBUTE__DEAD) && !defined(__dead)
+#ifdef _MSC_VER
+#define __dead      __declspec(noreturn)
+#else
+#define __dead      __attribute__((__noreturn__))
+#endif
+#endif
+
 #ifdef _WIN32
 #define __warn_references(sym,msg)
 #else
@@ -62,7 +70,7 @@ typedef SSIZE_T ssize_t;
 #if defined(__GNUC__)  && defined (HAS_GNU_WARNING_LONG)
 #define __warn_references(sym,msg)          \
   __asm__(".section .gnu.warning." __STRING(sym)  \
-         " ; .ascii \"" msg "\" ; .text");
+         "\n\t.ascii \"" msg "\"\n\t.text");
 #else
 #define __warn_references(sym,msg)
 #endif

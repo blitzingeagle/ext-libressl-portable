@@ -1,4 +1,4 @@
-/* $OpenBSD: t_x509.c,v 1.28 2017/04/03 15:52:59 beck Exp $ */
+/* $OpenBSD: t_x509.c,v 1.32 2020/04/10 07:05:24 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -145,8 +145,10 @@ X509_print_ex(BIO *bp, X509 *x, unsigned long nmflags, unsigned long cflag)
 			goto err;
 
 		bs = X509_get_serialNumber(x);
-		if (bs->length <= (int)sizeof(long)) {
+		l = -1;
+		if (bs->length <= (int)sizeof(long))
 			l = ASN1_INTEGER_get(bs);
+		if (l != -1) {
 			if (bs->type == V_ASN1_NEG_INTEGER) {
 				l = -l;
 				neg = "-";
@@ -246,7 +248,8 @@ err:
 	return (ret);
 }
 
-int X509_ocspid_print (BIO *bp, X509 *x)
+int
+X509_ocspid_print(BIO *bp, X509 *x)
 {
 	unsigned char *der = NULL;
 	unsigned char *dertmp;
@@ -320,7 +323,7 @@ X509_signature_dump(BIO *bp, const ASN1_STRING *sig, int indent)
 }
 
 int
-X509_signature_print(BIO *bp, X509_ALGOR *sigalg, ASN1_STRING *sig)
+X509_signature_print(BIO *bp, const X509_ALGOR *sigalg, const ASN1_STRING *sig)
 {
 	int sig_nid;
 	if (BIO_puts(bp, "    Signature Algorithm: ") <= 0)
@@ -387,7 +390,7 @@ ASN1_TIME_print(BIO *bp, const ASN1_TIME *tm)
 }
 
 static const char *mon[12] = {
-	"Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
 
@@ -489,7 +492,7 @@ err:
 }
 
 int
-X509_NAME_print(BIO *bp, X509_NAME *name, int obase)
+X509_NAME_print(BIO *bp, const X509_NAME *name, int obase)
 {
 	char *s, *c, *b;
 	int ret = 0, l, i;
