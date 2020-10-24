@@ -1,4 +1,4 @@
-/* $OpenBSD: ec_lib.c,v 1.24 2017/05/02 03:59:44 deraadt Exp $ */
+/* $OpenBSD: ec_lib.c,v 1.32 2019/09/29 10:09:09 tb Exp $ */
 /*
  * Originally written by Bodo Moeller for the OpenSSL project.
  */
@@ -68,6 +68,7 @@
 #include <openssl/err.h>
 #include <openssl/opensslv.h>
 
+#include "bn_lcl.h"
 #include "ec_lcl.h"
 
 /* functions for EC_GROUP objects */
@@ -252,6 +253,80 @@ EC_METHOD_get_field_type(const EC_METHOD *meth)
 	return meth->field_type;
 }
 
+/*
+ * Try computing the cofactor from generator order n and field cardinality q.
+ * This works for all curves of cryptographic interest.
+ *
+ * Hasse's theorem: | h * n - (q + 1) | <= 2 * sqrt(q)
+ *
+ * So: h_min = (q + 1 - 2*sqrt(q)) / n and h_max = (q + 1 + 2*sqrt(q)) / n and
+ * therefore h_max - h_min = 4*sqrt(q) / n. So if n > 4*sqrt(q) holds, there is
+ * only one possible value for h:
+ *
+ *	h = \lfloor (h_min + h_max)/2 \rceil = \lfloor (q + 1)/n \rceil
+ *
+ * Otherwise, zero cofactor and return success.
+ */
+static int
+ec_guess_cofactor(EC_GROUP *group)
+{
+	BN_CTX *ctx = NULL;
+	BIGNUM *q = NULL;
+	int ret = 0;
+
+	/*
+	 * If the cofactor is too large, we cannot guess it and default to zero.
+	 * The RHS of below is a strict overestimate of log(4 * sqrt(q)).
+	 */
+	if (BN_num_bits(&group->order) <=
+	    (BN_num_bits(&group->field) + 1) / 2 + 3) {
+		BN_zero(&group->cofactor);
+		return 1;
+	}
+
+	if ((ctx = BN_CTX_new()) == NULL)
+		goto err;
+
+	BN_CTX_start(ctx);
+	if ((q = BN_CTX_get(ctx)) == NULL)
+		goto err;
+
+	/* Set q = 2**m for binary fields; q = p otherwise. */
+	if (group->meth->field_type == NID_X9_62_characteristic_two_field) {
+		BN_zero(q);
+		if (!BN_set_bit(q, BN_num_bits(&group->field) - 1))
+			goto err;
+	} else {
+		if (!BN_copy(q, &group->field))
+			goto err;
+	}
+	
+	/*
+	 * Compute
+	 *     h = \lfloor (q + 1)/n \rceil = \lfloor (q + 1 + n/2) / n \rfloor.
+	 */
+
+	/* h = n/2 */
+	if (!BN_rshift1(&group->cofactor, &group->order))
+		goto err;
+	/* h = 1 + n/2 */
+	if (!BN_add(&group->cofactor, &group->cofactor, BN_value_one()))
+		goto err;
+	/* h = q + 1 + n/2 */
+	if (!BN_add(&group->cofactor, &group->cofactor, q))
+		goto err;
+	/* h = (q + 1 + n/2) / n */
+	if (!BN_div_ct(&group->cofactor, NULL, &group->cofactor, &group->order,
+	    ctx))
+		goto err;
+
+	ret = 1;
+ err:
+	BN_CTX_end(ctx);
+	BN_CTX_free(ctx);
+	BN_zero(&group->cofactor);
+	return ret;
+}
 
 int 
 EC_GROUP_set_generator(EC_GROUP *group, const EC_POINT *generator,
@@ -261,6 +336,33 @@ EC_GROUP_set_generator(EC_GROUP *group, const EC_POINT *generator,
 		ECerror(ERR_R_PASSED_NULL_PARAMETER);
 		return 0;
 	}
+
+	/* Require group->field >= 1. */
+	if (BN_is_zero(&group->field) || BN_is_negative(&group->field)) {
+		ECerror(EC_R_INVALID_FIELD);
+		return 0;
+	}
+
+	/*
+	 * Require order >= 1 and enforce an upper bound of at most one bit more
+	 * than the field cardinality due to Hasse's theorem.
+	 */
+	if (order == NULL || BN_is_zero(order) || BN_is_negative(order) ||
+	    BN_num_bits(order) > BN_num_bits(&group->field) + 1) {
+		ECerror(EC_R_INVALID_GROUP_ORDER);
+		return 0;
+	}
+
+	/*
+	 * Unfortunately, the cofactor is an optional field in many standards.
+	 * Internally, the library uses a 0 cofactor as a marker for "unknown
+	 * cofactor".  So accept cofactor == NULL or cofactor >= 0.
+	 */
+	if (cofactor != NULL && BN_is_negative(cofactor)) {
+		ECerror(EC_R_UNKNOWN_COFACTOR);
+		return 0;
+	}
+
 	if (group->generator == NULL) {
 		group->generator = EC_POINT_new(group);
 		if (group->generator == NULL)
@@ -269,17 +371,15 @@ EC_GROUP_set_generator(EC_GROUP *group, const EC_POINT *generator,
 	if (!EC_POINT_copy(group->generator, generator))
 		return 0;
 
-	if (order != NULL) {
-		if (!BN_copy(&group->order, order))
-			return 0;
-	} else
-		BN_zero(&group->order);
+	if (!BN_copy(&group->order, order))
+		return 0;
 
-	if (cofactor != NULL) {
+	/* Either take the provided positive cofactor, or try to compute it. */
+	if (cofactor != NULL && !BN_is_zero(cofactor)) {
 		if (!BN_copy(&group->cofactor, cofactor))
 			return 0;
-	} else
-		BN_zero(&group->cofactor);
+	} else if (!ec_guess_cofactor(group))
+		return 0;
 
 	return 1;
 }
@@ -526,13 +626,30 @@ EC_GROUP_cmp(const EC_GROUP * a, const EC_GROUP * b, BN_CTX * ctx)
 
 	return r;
 
-err:
+ err:
 	BN_CTX_end(ctx);
 	if (ctx_new)
 		BN_CTX_free(ctx);
 	return -1;
 }
 
+/*
+ * Coordinate blinding for EC_POINT.
+ *
+ * The underlying EC_METHOD can optionally implement this function:
+ * underlying implementations should return 0 on errors, or 1 on success.
+ *
+ * This wrapper returns 1 in case the underlying EC_METHOD does not support
+ * coordinate blinding.
+ */
+int
+ec_point_blind_coordinates(const EC_GROUP *group, EC_POINT *p, BN_CTX *ctx)
+{
+	if (group->meth->blind_coordinates == NULL)
+		return 1;
+
+	return group->meth->blind_coordinates(group, p, ctx);
+}
 
 /* this has 'package' visibility */
 int 
@@ -1026,47 +1143,88 @@ EC_POINTs_make_affine(const EC_GROUP *group, size_t num, EC_POINT *points[],
 }
 
 
-/* Functions for point multiplication.
- *
- * If group->meth->mul is 0, we use the wNAF-based implementations in ec_mult.c;
- * otherwise we dispatch through methods.
- */
-
+/* Functions for point multiplication */
 int 
 EC_POINTs_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
     size_t num, const EC_POINT *points[], const BIGNUM *scalars[], BN_CTX *ctx)
 {
-	if (group->meth->mul == 0)
-		/* use default */
-		return ec_wNAF_mul(group, r, scalar, num, points, scalars, ctx);
-
-	return group->meth->mul(group, r, scalar, num, points, scalars, ctx);
+	/*
+	 * The function pointers must be set, and only support num == 0 and
+	 * num == 1.
+	 */
+	if (group->meth->mul_generator_ct == NULL ||
+	    group->meth->mul_single_ct == NULL ||
+	    group->meth->mul_double_nonct == NULL ||
+	    num > 1) {
+		ECerror(ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
+		return 0;
+	}
+	
+	/* Either bP or aG + bP, this is sane. */
+	if (num == 1 && points != NULL && scalars != NULL)
+		return EC_POINT_mul(group, r, scalar, points[0], scalars[0],
+		    ctx);
+	
+	/* aG, this is sane */
+	if (scalar != NULL && points == NULL && scalars == NULL)
+		return EC_POINT_mul(group, r, scalar, NULL, NULL, ctx);
+	
+	/* anything else is an error */
+	ECerror(ERR_R_EC_LIB);
+	return 0;
 }
 
 int 
 EC_POINT_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *g_scalar,
     const EC_POINT *point, const BIGNUM *p_scalar, BN_CTX *ctx)
 {
-	/* just a convenient interface to EC_POINTs_mul() */
-
-	const EC_POINT *points[1];
-	const BIGNUM *scalars[1];
-
-	points[0] = point;
-	scalars[0] = p_scalar;
-
-	return EC_POINTs_mul(group, r, g_scalar,
-	    (point != NULL && p_scalar != NULL),
-	    points, scalars, ctx);
+	if (group->meth->mul_generator_ct == NULL ||
+	    group->meth->mul_single_ct == NULL ||
+	    group->meth->mul_double_nonct == NULL) {
+		ECerror(ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
+		return 0;
+	}
+	if (g_scalar != NULL && point == NULL && p_scalar == NULL) {
+		/*
+		 * In this case we want to compute g_scalar * GeneratorPoint:
+		 * this codepath is reached most prominently by (ephemeral) key
+		 * generation of EC cryptosystems (i.e. ECDSA keygen and sign
+		 * setup, ECDH keygen/first half), where the scalar is always
+		 * secret. This is why we ignore if BN_FLG_CONSTTIME is actually
+		 * set and we always call the constant time version.
+		 */
+		return group->meth->mul_generator_ct(group, r, g_scalar, ctx);
+	}
+	if (g_scalar == NULL && point != NULL && p_scalar != NULL) {
+		/* In this case we want to compute p_scalar * GenericPoint:
+		 * this codepath is reached most prominently by the second half
+		 * of ECDH, where the secret scalar is multiplied by the peer's
+		 * public point. To protect the secret scalar, we ignore if
+		 * BN_FLG_CONSTTIME is actually set and we always call the
+		 * constant time version.
+		 */
+		return group->meth->mul_single_ct(group, r, p_scalar, point,
+		    ctx);
+	}
+	if (g_scalar != NULL && point != NULL && p_scalar != NULL) {
+		/*
+		 * In this case we want to compute
+		 *   g_scalar * GeneratorPoint + p_scalar * GenericPoint:
+		 * this codepath is reached most prominently by ECDSA signature
+		 * verification. So we call the non-ct version.
+		 */
+		return group->meth->mul_double_nonct(group, r, g_scalar,
+		    p_scalar, point, ctx);
+	}
+		
+	/* Anything else is an error. */
+	ECerror(ERR_R_EC_LIB);
+	return 0;
 }
 
 int 
 EC_GROUP_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 {
-	if (group->meth->mul == 0)
-		/* use default */
-		return ec_wNAF_precompute_mult(group, ctx);
-
 	if (group->meth->precompute_mult != 0)
 		return group->meth->precompute_mult(group, ctx);
 	else
@@ -1076,10 +1234,6 @@ EC_GROUP_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 int 
 EC_GROUP_have_precompute_mult(const EC_GROUP * group)
 {
-	if (group->meth->mul == 0)
-		/* use default */
-		return ec_wNAF_have_precompute_mult(group);
-
 	if (group->meth->have_precompute_mult != 0)
 		return group->meth->have_precompute_mult(group);
 	else

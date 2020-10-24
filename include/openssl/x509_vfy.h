@@ -1,4 +1,4 @@
-/* $OpenBSD: x509_vfy.h,v 1.27 2018/03/20 15:26:22 jsing Exp $ */
+/* $OpenBSD: x509_vfy.h,v 1.31 2020/09/13 15:06:17 beck Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -134,17 +134,16 @@ typedef struct x509_lookup_method_st
 	void (*free)(X509_LOOKUP *ctx);
 	int (*init)(X509_LOOKUP *ctx);
 	int (*shutdown)(X509_LOOKUP *ctx);
-	int (*ctrl)(X509_LOOKUP *ctx,int cmd,const char *argc,long argl,
-			char **ret);
-	int (*get_by_subject)(X509_LOOKUP *ctx,int type,X509_NAME *name,
-			      X509_OBJECT *ret);
-	int (*get_by_issuer_serial)(X509_LOOKUP *ctx,int type,X509_NAME *name,
-				    ASN1_INTEGER *serial,X509_OBJECT *ret);
-	int (*get_by_fingerprint)(X509_LOOKUP *ctx,int type,
-				  unsigned char *bytes,int len,
-				  X509_OBJECT *ret);
-	int (*get_by_alias)(X509_LOOKUP *ctx,int type,char *str,int len,
-			    X509_OBJECT *ret);
+	int (*ctrl)(X509_LOOKUP *ctx, int cmd, const char *argc, long argl,
+	    char **ret);
+	int (*get_by_subject)(X509_LOOKUP *ctx, int type, X509_NAME *name,
+	    X509_OBJECT *ret);
+	int (*get_by_issuer_serial)(X509_LOOKUP *ctx, int type, X509_NAME *name,
+	    ASN1_INTEGER *serial,X509_OBJECT *ret);
+	int (*get_by_fingerprint)(X509_LOOKUP *ctx, int type,
+	    const unsigned char *bytes, int len, X509_OBJECT *ret);
+	int (*get_by_alias)(X509_LOOKUP *ctx, int type, const char *str,
+	    int len, X509_OBJECT *ret);
 	} X509_LOOKUP_METHOD;
 
 typedef struct X509_VERIFY_PARAM_ID_st X509_VERIFY_PARAM_ID;
@@ -408,6 +407,9 @@ void X509_STORE_CTX_set_depth(X509_STORE_CTX *ctx, int depth);
 /* Do not check certificate or CRL validity against current time. */
 #define X509_V_FLAG_NO_CHECK_TIME		0x200000
 
+/* Force the use of the legacy certificate verifcation */
+#define X509_V_FLAG_LEGACY_VERIFY		0x400000
+
 #define X509_VP_FLAG_DEFAULT			0x1
 #define X509_VP_FLAG_OVERWRITE			0x2
 #define X509_VP_FLAG_RESET_FLAGS		0x4
@@ -424,7 +426,7 @@ int X509_OBJECT_idx_by_subject(STACK_OF(X509_OBJECT) *h, int type,
 	     X509_NAME *name);
 X509_OBJECT *X509_OBJECT_retrieve_by_subject(STACK_OF(X509_OBJECT) *h,int type,X509_NAME *name);
 X509_OBJECT *X509_OBJECT_retrieve_match(STACK_OF(X509_OBJECT) *h, X509_OBJECT *x);
-void X509_OBJECT_up_ref_count(X509_OBJECT *a);
+int X509_OBJECT_up_ref_count(X509_OBJECT *a);
 int X509_OBJECT_get_type(const X509_OBJECT *a);
 void X509_OBJECT_free_contents(X509_OBJECT *a);
 X509 *X509_OBJECT_get0_X509(const X509_OBJECT *xo);
@@ -496,8 +498,8 @@ int X509_LOOKUP_by_subject(X509_LOOKUP *ctx, int type, X509_NAME *name,
 int X509_LOOKUP_by_issuer_serial(X509_LOOKUP *ctx, int type, X509_NAME *name,
 	ASN1_INTEGER *serial, X509_OBJECT *ret);
 int X509_LOOKUP_by_fingerprint(X509_LOOKUP *ctx, int type,
-	unsigned char *bytes, int len, X509_OBJECT *ret);
-int X509_LOOKUP_by_alias(X509_LOOKUP *ctx, int type, char *str,
+	const unsigned char *bytes, int len, X509_OBJECT *ret);
+int X509_LOOKUP_by_alias(X509_LOOKUP *ctx, int type, const char *str,
 	int len, X509_OBJECT *ret);
 int X509_LOOKUP_shutdown(X509_LOOKUP *ctx);
 

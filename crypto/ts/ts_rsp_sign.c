@@ -1,4 +1,4 @@
-/* $OpenBSD: ts_rsp_sign.c,v 1.21 2017/01/29 17:49:23 beck Exp $ */
+/* $OpenBSD: ts_rsp_sign.c,v 1.23 2019/07/03 03:24:04 deraadt Exp $ */
 /* Written by Zoltan Glozik (zglozik@stones.com) for the OpenSSL
  * project 2002.
  */
@@ -201,7 +201,7 @@ TS_RESP_CTX_set_signer_key(TS_RESP_CTX *ctx, EVP_PKEY *key)
 }
 
 int
-TS_RESP_CTX_set_def_policy(TS_RESP_CTX *ctx, ASN1_OBJECT *def_policy)
+TS_RESP_CTX_set_def_policy(TS_RESP_CTX *ctx, const ASN1_OBJECT *def_policy)
 {
 	if (ctx->default_policy)
 		ASN1_OBJECT_free(ctx->default_policy);
@@ -238,7 +238,7 @@ TS_RESP_CTX_set_certs(TS_RESP_CTX *ctx, STACK_OF(X509) *certs)
 }
 
 int
-TS_RESP_CTX_add_policy(TS_RESP_CTX *ctx, ASN1_OBJECT *policy)
+TS_RESP_CTX_add_policy(TS_RESP_CTX *ctx, const ASN1_OBJECT *policy)
 {
 	ASN1_OBJECT *copy = NULL;
 
@@ -1001,7 +1001,7 @@ TS_RESP_set_genTime_with_precision(ASN1_GENERALIZEDTIME *asn1_time,
 	    "%04d%02d%02d%02d%02d%02d%sZ",
 	    tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
 	    tm->tm_hour, tm->tm_min, tm->tm_sec, usecstr);
-	if (rv == -1 || rv >= sizeof(genTime_str))
+	if (rv < 0 || rv >= sizeof(genTime_str))
 		goto err;
 
 	/* Now call OpenSSL to check and set our genTime value */

@@ -1,4 +1,4 @@
-/* $OpenBSD: a_type.c,v 1.19 2016/05/04 15:00:24 tedu Exp $ */
+/* $OpenBSD: a_type.c,v 1.21 2019/10/24 16:36:10 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -62,7 +62,7 @@
 #include <openssl/objects.h>
 
 int
-ASN1_TYPE_get(ASN1_TYPE *a)
+ASN1_TYPE_get(const ASN1_TYPE *a)
 {
 	if ((a->value.ptr != NULL) || (a->type == V_ASN1_NULL))
 		return (a->type);
@@ -108,7 +108,7 @@ ASN1_TYPE_set1(ASN1_TYPE *a, int type, const void *value)
 
 /* Returns 0 if they are equal, != 0 otherwise. */
 int
-ASN1_TYPE_cmp(ASN1_TYPE *a, ASN1_TYPE *b)
+ASN1_TYPE_cmp(const ASN1_TYPE *a, const ASN1_TYPE *b)
 {
 	int result = -1;
 
@@ -153,4 +153,35 @@ ASN1_TYPE_cmp(ASN1_TYPE *a, ASN1_TYPE *b)
 	}
 
 	return result;
+}
+
+ASN1_TYPE *
+ASN1_TYPE_pack_sequence(const ASN1_ITEM *it, void *s, ASN1_TYPE **t)
+{
+	ASN1_OCTET_STRING *oct;
+	ASN1_TYPE *rt;
+
+	if ((oct = ASN1_item_pack(s, it, NULL)) == NULL)
+		return NULL;
+
+	if (t != NULL && *t != NULL) {
+		rt = *t;
+	} else {
+		if ((rt = ASN1_TYPE_new()) == NULL) {
+			ASN1_OCTET_STRING_free(oct);
+			return NULL;
+		}
+		if (t != NULL)
+			*t = rt;
+	}
+	ASN1_TYPE_set(rt, V_ASN1_SEQUENCE, oct);
+	return rt;
+}
+
+void *
+ASN1_TYPE_unpack_sequence(const ASN1_ITEM *it, const ASN1_TYPE *t)
+{
+	if (t == NULL || t->type != V_ASN1_SEQUENCE || t->value.sequence == NULL)
+		return NULL;
+	return ASN1_item_unpack(t->value.sequence, it);
 }

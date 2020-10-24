@@ -1,4 +1,4 @@
-/* $OpenBSD: d1_both.c,v 1.52 2017/10/08 16:24:02 jsing Exp $ */
+/* $OpenBSD: d1_both.c,v 1.60 2020/09/26 14:43:17 jsing Exp $ */
 /*
  * DTLS implementation written by Nagendra Modadugu
  * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.
@@ -161,49 +161,41 @@ static unsigned int g_probable_mtu[] = {1500 - 28, 512 - 28, 256 - 28};
 static unsigned int dtls1_guess_mtu(unsigned int curr_mtu);
 static void dtls1_fix_message_header(SSL *s, unsigned long frag_off,
     unsigned long frag_len);
-static unsigned char *dtls1_write_message_header(SSL *s, unsigned char *p);
+static int dtls1_write_message_header(const struct hm_header_st *msg_hdr,
+    unsigned long frag_off, unsigned long frag_len, unsigned char *p);
 static long dtls1_get_message_fragment(SSL *s, int st1, int stn, long max,
     int *ok);
+
+void dtls1_hm_fragment_free(hm_fragment *frag);
 
 static hm_fragment *
 dtls1_hm_fragment_new(unsigned long frag_len, int reassembly)
 {
-	hm_fragment *frag = NULL;
-	unsigned char *buf = NULL;
-	unsigned char *bitmask = NULL;
+	hm_fragment *frag;
 
-	frag = malloc(sizeof(hm_fragment));
-	if (frag == NULL)
-		return NULL;
+	if ((frag = calloc(1, sizeof(*frag))) == NULL)
+		goto err;
 
-	if (frag_len) {
-		buf = malloc(frag_len);
-		if (buf == NULL) {
-			free(frag);
-			return NULL;
-		}
+	if (frag_len > 0) {
+		if ((frag->fragment = calloc(1, frag_len)) == NULL)
+			goto err;
 	}
 
-	/* zero length fragment gets zero frag->fragment */
-	frag->fragment = buf;
-
-	/* Initialize reassembly bitmask if necessary */
+	/* Initialize reassembly bitmask if necessary. */
 	if (reassembly) {
-		bitmask = malloc(RSMBLY_BITMASK_SIZE(frag_len));
-		if (bitmask == NULL) {
-			free(buf);
-			free(frag);
-			return NULL;
-		}
-		memset(bitmask, 0, RSMBLY_BITMASK_SIZE(frag_len));
+		if ((frag->reassembly = calloc(1,
+		    RSMBLY_BITMASK_SIZE(frag_len))) == NULL)
+			goto err;
 	}
-
-	frag->reassembly = bitmask;
 
 	return frag;
+
+ err:
+	dtls1_hm_fragment_free(frag);
+	return NULL;
 }
 
-static void
+void
 dtls1_hm_fragment_free(hm_fragment *frag)
 {
 	if (frag == NULL)
@@ -212,7 +204,7 @@ dtls1_hm_fragment_free(hm_fragment *frag)
 	if (frag->msg_header.is_ccs) {
 		EVP_CIPHER_CTX_free(
 		    frag->msg_header.saved_retransmit_state.enc_write_ctx);
-		EVP_MD_CTX_destroy(
+		EVP_MD_CTX_free(
 		    frag->msg_header.saved_retransmit_state.write_hash);
 	}
 	free(frag->fragment);
@@ -301,8 +293,10 @@ dtls1_do_write(SSL *s, int type)
 			dtls1_fix_message_header(s, frag_off,
 			    len - DTLS1_HM_HEADER_LENGTH);
 
-			dtls1_write_message_header(s,
-			    (unsigned char *)&s->internal->init_buf->data[s->internal->init_off]);
+			if (!dtls1_write_message_header(&D1I(s)->w_msg_hdr,
+			    D1I(s)->w_msg_hdr.frag_off, D1I(s)->w_msg_hdr.frag_len,
+			    (unsigned char *)&s->internal->init_buf->data[s->internal->init_off]))
+				return -1;
 
 			OPENSSL_assert(len >= DTLS1_HM_HEADER_LENGTH);
 		}
@@ -348,19 +342,16 @@ dtls1_do_write(SSL *s, int type)
 					 * Reconstruct message header is if it
 					 * is being sent in single fragment
 					 */
-					*p++ = msg_hdr->type;
-					l2n3(msg_hdr->msg_len, p);
-					s2n (msg_hdr->seq, p);
-					l2n3(0, p);
-					l2n3(msg_hdr->msg_len, p);
-					p -= DTLS1_HM_HEADER_LENGTH;
+					if (!dtls1_write_message_header(msg_hdr,
+					    0, msg_hdr->msg_len, p))
+						return (-1);
 					xlen = ret;
 				} else {
 					p += DTLS1_HM_HEADER_LENGTH;
 					xlen = ret - DTLS1_HM_HEADER_LENGTH;
 				}
 
-				tls1_finish_mac(s, p, xlen);
+				tls1_transcript_record(s, p, xlen);
 			}
 
 			if (ret == s->internal->init_num) {
@@ -417,7 +408,7 @@ dtls1_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 	}
 
 	msg_hdr = &D1I(s)->r_msg_hdr;
-	memset(msg_hdr, 0x00, sizeof(struct hm_header_st));
+	memset(msg_hdr, 0, sizeof(struct hm_header_st));
 
 again:
 	i = dtls1_get_message_fragment(s, st1, stn, max, ok);
@@ -431,21 +422,17 @@ again:
 	msg_len = msg_hdr->msg_len;
 
 	/* reconstruct message header */
-	*(p++) = msg_hdr->type;
-	l2n3(msg_len, p);
-	s2n (msg_hdr->seq, p);
-	l2n3(0, p);
-	l2n3(msg_len, p);
+	if (!dtls1_write_message_header(msg_hdr, 0, msg_len, p))
+		return -1;
 
-	p -= DTLS1_HM_HEADER_LENGTH;
 	msg_len += DTLS1_HM_HEADER_LENGTH;
 
-	tls1_finish_mac(s, p, msg_len);
+	tls1_transcript_record(s, p, msg_len);
 	if (s->internal->msg_callback)
 		s->internal->msg_callback(0, s->version, SSL3_RT_HANDSHAKE, p, msg_len,
 		    s, s->internal->msg_callback_arg);
 
-	memset(msg_hdr, 0x00, sizeof(struct hm_header_st));
+	memset(msg_hdr, 0, sizeof(struct hm_header_st));
 
 	/* Don't change sequence numbers while listening */
 	if (!D1I(s)->listen)
@@ -1050,7 +1037,7 @@ dtls1_retransmit_message(SSL *s, unsigned short seq, unsigned long frag_off,
 	item = pqueue_find(s->d1->sent_messages, seq64be);
 	if (item == NULL) {
 #ifdef DEBUG
-		fprintf(stderr, "retransmit:  message %d non-existant\n", seq);
+		fprintf(stderr, "retransmit:  message %d non-existent\n", seq);
 #endif
 		*found = 0;
 		return 0;
@@ -1167,19 +1154,33 @@ dtls1_fix_message_header(SSL *s, unsigned long frag_off, unsigned long frag_len)
 	msg_hdr->frag_len = frag_len;
 }
 
-static unsigned char *
-dtls1_write_message_header(SSL *s, unsigned char *p)
+static int
+dtls1_write_message_header(const struct hm_header_st *msg_hdr,
+    unsigned long frag_off, unsigned long frag_len, unsigned char *p)
 {
-	struct hm_header_st *msg_hdr = &D1I(s)->w_msg_hdr;
+	CBB cbb;
 
-	*p++ = msg_hdr->type;
-	l2n3(msg_hdr->msg_len, p);
+	/* We assume DTLS1_HM_HEADER_LENGTH bytes are available for now... */
+	if (!CBB_init_fixed(&cbb, p, DTLS1_HM_HEADER_LENGTH))
+		return 0;
+	if (!CBB_add_u8(&cbb, msg_hdr->type))
+		goto err;
+	if (!CBB_add_u24(&cbb, msg_hdr->msg_len))
+		goto err;
+	if (!CBB_add_u16(&cbb, msg_hdr->seq))
+		goto err;
+	if (!CBB_add_u24(&cbb, frag_off))
+		goto err;
+	if (!CBB_add_u24(&cbb, frag_len))
+		goto err;
+	if (!CBB_finish(&cbb, NULL, NULL))
+		goto err;
 
-	s2n(msg_hdr->seq, p);
-	l2n3(msg_hdr->frag_off, p);
-	l2n3(msg_hdr->frag_len, p);
+	return 1;
 
-	return p;
+ err:
+	CBB_cleanup(&cbb);
+	return 0;
 }
 
 unsigned int
@@ -1239,16 +1240,7 @@ dtls1_get_message_header(unsigned char *data, struct hm_header_st *msg_hdr)
 void
 dtls1_get_ccs_header(unsigned char *data, struct ccs_header_st *ccs_hdr)
 {
-	memset(ccs_hdr, 0x00, sizeof(struct ccs_header_st));
+	memset(ccs_hdr, 0, sizeof(struct ccs_header_st));
 
 	ccs_hdr->type = *(data++);
-}
-
-int
-dtls1_shutdown(SSL *s)
-{
-	int ret;
-
-	ret = ssl3_shutdown(s);
-	return ret;
 }
