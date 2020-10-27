@@ -335,18 +335,8 @@ set(OPENSSL_LIBS tls ssl crypto ${PLATFORM_LIBS})
 
 add_subdirectory(crypto)
 add_subdirectory(ssl)
-if(LIBRESSL_APPS)
-	add_subdirectory(apps)
-endif()
 add_subdirectory(tls)
 add_subdirectory(include)
-if(NOT MSVC)
-	add_subdirectory(man)
-endif()
-# Tests require the openssl executable and are unavailable when building shared libraries
-if(LIBRESSL_APPS AND LIBRESSL_TESTS)
-	add_subdirectory(tests)
-endif()
 
 if(NOT MSVC)
 	# Create pkgconfig files.

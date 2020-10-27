@@ -1,3 +1,11 @@
+Built from https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-3.2.2.tar.gz
+
+Modifications:
+- Removed tests/mandocs/pkgconfig/scripts/apps/cmake_uninstall from both filesystem and CMakeLists.txt
+- Removed m4 configuration files + make build scripts
+
+===
+
 ![LibreSSL image](https://www.libressl.org/images/libressl.jpg)
 ## Official portable version of [LibreSSL](https://www.libressl.org) ##
 
