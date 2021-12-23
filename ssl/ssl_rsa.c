@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_rsa.c,v 1.31 2019/03/25 16:46:48 jsing Exp $ */
+/* $OpenBSD: ssl_rsa.c,v 1.34 2021/06/11 11:13:53 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -58,17 +58,20 @@
 
 #include <stdio.h>
 
-#include "ssl_locl.h"
-
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
+#include "ssl_locl.h"
+
 static int ssl_set_cert(CERT *c, X509 *x509);
 static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey);
-static int ssl_ctx_use_certificate_chain_bio(SSL_CTX *, BIO *);
+static int use_certificate_chain_bio(BIO *in, CERT *cert,
+    pem_password_cb *passwd_cb, void *passwd_arg);
+static int use_certificate_chain_file(const char *file, CERT *cert,
+    pem_password_cb *passwd_cb, void *passwd_arg);
 
 int
 SSL_use_certificate(SSL *ssl, X509 *x)
@@ -117,7 +120,7 @@ SSL_use_certificate_file(SSL *ssl, const char *file, int type)
 	}
 
 	ret = SSL_use_certificate(ssl, x);
-end:
+ end:
 	X509_free(x);
 	BIO_free(in);
 	return (ret);
@@ -240,7 +243,7 @@ SSL_use_RSAPrivateKey_file(SSL *ssl, const char *file, int type)
 	}
 	ret = SSL_use_RSAPrivateKey(ssl, rsa);
 	RSA_free(rsa);
-end:
+ end:
 	BIO_free(in);
 	return (ret);
 }
@@ -309,7 +312,7 @@ SSL_use_PrivateKey_file(SSL *ssl, const char *file, int type)
 	}
 	ret = SSL_use_PrivateKey(ssl, pkey);
 	EVP_PKEY_free(pkey);
-end:
+ end:
 	BIO_free(in);
 	return (ret);
 }
@@ -433,7 +436,7 @@ SSL_CTX_use_certificate_file(SSL_CTX *ctx, const char *file, int type)
 	}
 
 	ret = SSL_CTX_use_certificate(ctx, x);
-end:
+ end:
 	X509_free(x);
 	BIO_free(in);
 	return (ret);
@@ -514,7 +517,7 @@ SSL_CTX_use_RSAPrivateKey_file(SSL_CTX *ctx, const char *file, int type)
 	}
 	ret = SSL_CTX_use_RSAPrivateKey(ctx, rsa);
 	RSA_free(rsa);
-end:
+ end:
 	BIO_free(in);
 	return (ret);
 }
@@ -580,7 +583,7 @@ SSL_CTX_use_PrivateKey_file(SSL_CTX *ctx, const char *file, int type)
 	}
 	ret = SSL_CTX_use_PrivateKey(ctx, pkey);
 	EVP_PKEY_free(pkey);
-end:
+ end:
 	BIO_free(in);
 	return (ret);
 }
@@ -609,29 +612,29 @@ SSL_CTX_use_PrivateKey_ASN1(int type, SSL_CTX *ctx, const unsigned char *d,
  * sent to the peer in the Certificate message.
  */
 static int
-ssl_ctx_use_certificate_chain_bio(SSL_CTX *ctx, BIO *in)
+use_certificate_chain_bio(BIO *in, CERT *cert, pem_password_cb *passwd_cb,
+    void *passwd_arg)
 {
 	X509 *ca, *x = NULL;
 	unsigned long err;
 	int ret = 0;
 
-	if ((x = PEM_read_bio_X509_AUX(in, NULL, ctx->default_passwd_callback,
-	    ctx->default_passwd_callback_userdata)) == NULL) {
+	if ((x = PEM_read_bio_X509_AUX(in, NULL, passwd_cb, passwd_arg)) ==
+	    NULL) {
 		SSLerrorx(ERR_R_PEM_LIB);
 		goto err;
 	}
 
-	if (!SSL_CTX_use_certificate(ctx, x))
+	if (!ssl_set_cert(cert, x))
 		goto err;
 
-	if (!ssl_cert_set0_chain(ctx->internal->cert, NULL))
+	if (!ssl_cert_set0_chain(cert, NULL))
 		goto err;
 
 	/* Process any additional CA certificates. */
-	while ((ca = PEM_read_bio_X509(in, NULL,
-	    ctx->default_passwd_callback,
-	    ctx->default_passwd_callback_userdata)) != NULL) {
-		if (!ssl_cert_add0_chain_cert(ctx->internal->cert, ca)) {
+	while ((ca = PEM_read_bio_X509(in, NULL, passwd_cb, passwd_arg)) !=
+	    NULL) {
+		if (!ssl_cert_add0_chain_cert(cert, ca)) {
 			X509_free(ca);
 			goto err;
 		}
@@ -652,7 +655,8 @@ ssl_ctx_use_certificate_chain_bio(SSL_CTX *ctx, BIO *in)
 }
 
 int
-SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file)
+use_certificate_chain_file(const char *file, CERT *cert,
+    pem_password_cb *passwd_cb, void *passwd_arg)
 {
 	BIO *in;
 	int ret = 0;
@@ -668,11 +672,27 @@ SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file)
 		goto end;
 	}
 
-	ret = ssl_ctx_use_certificate_chain_bio(ctx, in);
+	ret = use_certificate_chain_bio(in, cert, passwd_cb, passwd_arg);
 
-end:
+ end:
 	BIO_free(in);
 	return (ret);
+}
+
+int
+SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file)
+{
+	return use_certificate_chain_file(file, ctx->internal->cert,
+	    ctx->default_passwd_callback,
+	    ctx->default_passwd_callback_userdata);
+}
+
+int
+SSL_use_certificate_chain_file(SSL *ssl, const char *file)
+{
+	return use_certificate_chain_file(file, ssl->cert,
+	    ssl->ctx->default_passwd_callback,
+	    ssl->ctx->default_passwd_callback_userdata);
 }
 
 int
@@ -687,9 +707,11 @@ SSL_CTX_use_certificate_chain_mem(SSL_CTX *ctx, void *buf, int len)
 		goto end;
 	}
 
-	ret = ssl_ctx_use_certificate_chain_bio(ctx, in);
+	ret = use_certificate_chain_bio(in, ctx->internal->cert,
+	    ctx->default_passwd_callback,
+	    ctx->default_passwd_callback_userdata);
 
-end:
+ end:
 	BIO_free(in);
 	return (ret);
 }
