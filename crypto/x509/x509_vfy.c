@@ -1,4 +1,4 @@
-/* $OpenBSD: x509_vfy.c,v 1.81 2020/09/26 02:06:28 deraadt Exp $ */
+/* $OpenBSD: x509_vfy.c,v 1.89.2.1 2021/11/24 09:28:56 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -240,12 +240,13 @@ x509_vfy_check_id(X509_STORE_CTX *ctx) {
  * Oooooooh..
  */
 static int
-X509_verify_cert_legacy_build_chain(X509_STORE_CTX *ctx, int *bad)
+X509_verify_cert_legacy_build_chain(X509_STORE_CTX *ctx, int *bad, int *out_ok)
 {
 	X509 *x, *xtmp, *xtmp2, *chain_ss = NULL;
 	int bad_chain = 0;
 	X509_VERIFY_PARAM *param = ctx->param;
-	int depth, i, ok = 0;
+	int ok = 0, ret = 0;
+	int depth, i;
 	int num, j, retry, trust;
 	int (*cb) (int xok, X509_STORE_CTX *xctx);
 	STACK_OF(X509) *sktmp = NULL;
@@ -517,11 +518,15 @@ X509_verify_cert_legacy_build_chain(X509_STORE_CTX *ctx, int *bad)
 		if (!ok)
 			goto end;
 	}
+
+	ret = 1;
  end:
 	sk_X509_free(sktmp);
 	X509_free(chain_ss);
 	*bad = bad_chain;
-	return ok;
+	*out_ok = ok;
+
+	return ret;
 }
 
 static int
@@ -531,8 +536,7 @@ X509_verify_cert_legacy(X509_STORE_CTX *ctx)
 
 	ctx->error = X509_V_OK; /* Initialize to OK */
 
-	ok = X509_verify_cert_legacy_build_chain(ctx, &bad_chain);
-	if (!ok)
+	if (!X509_verify_cert_legacy_build_chain(ctx, &bad_chain, &ok))
 		goto end;
 
 	/* We have the chain complete: now we need to check its purpose */
@@ -630,60 +634,13 @@ X509_verify_cert(X509_STORE_CTX *ctx)
 
 	/* Use the modern multi-chain verifier from x509_verify_cert */
 
-	/* Find our trusted roots */
-	ctx->error = X509_V_ERR_OUT_OF_MEM;
-
-	if (ctx->get_issuer == get_issuer_sk) {
-		/*
-		 * We are using the trusted stack method. so
-		 * the roots are in the aptly named "ctx->other_ctx"
-		 * pointer. (It could have been called "al")
-		 */
-		if ((roots = X509_chain_up_ref(ctx->other_ctx)) == NULL)
-			return -1;
-	} else {
-		/*
-		 * We have a X509_STORE and need to pull out the roots.
-		 * Don't look Ethel...
-		 */
-		STACK_OF(X509_OBJECT) *objs;
-		size_t i, good = 1;
-
-		if ((roots = sk_X509_new_null()) == NULL)
-			return -1;
-
-		CRYPTO_w_lock(CRYPTO_LOCK_X509_STORE);
-		if ((objs = X509_STORE_get0_objects(ctx->ctx)) == NULL)
-				good = 0;
-		for (i = 0; good && i < sk_X509_OBJECT_num(objs); i++) {
-			X509_OBJECT *obj;
-			X509 *root;
-			obj = sk_X509_OBJECT_value(objs, i);
-			if (obj->type != X509_LU_X509)
-				continue;
-			root = obj->data.x509;
-			if (X509_up_ref(root) == 0)
-				good = 0;
-			if (sk_X509_push(roots, root) == 0) {
-				X509_free(root);
-				good = 0;
-			}
-		}
-		CRYPTO_w_unlock(CRYPTO_LOCK_X509_STORE);
-
-		if (!good) {
-			sk_X509_pop_free(roots, X509_free);
-			return -1;
-		}
-	}
-
-	if ((vctx = x509_verify_ctx_new_from_xsc(ctx, roots)) != NULL) {
+	if ((vctx = x509_verify_ctx_new_from_xsc(ctx)) != NULL) {
 		ctx->error = X509_V_OK; /* Initialize to OK */
 		chain_count = x509_verify(vctx, NULL, NULL);
 	}
+	x509_verify_ctx_free(vctx);
 
 	sk_X509_pop_free(roots, X509_free);
-	x509_verify_ctx_free(vctx);
 
 	/* if we succeed we have a chain in ctx->chain */
 	return (chain_count > 0 && ctx->chain != NULL);
@@ -910,7 +867,8 @@ check_name_constraints(X509_STORE_CTX *ctx)
 
 /* Given a certificate try and find an exact match in the store */
 
-static X509 *lookup_cert_match(X509_STORE_CTX *ctx, X509 *x)
+static X509 *
+lookup_cert_match(X509_STORE_CTX *ctx, X509 *x)
 {
 	STACK_OF(X509) *certs;
 	X509 *xtmp = NULL;
@@ -937,7 +895,17 @@ static X509 *lookup_cert_match(X509_STORE_CTX *ctx, X509 *x)
 	return xtmp;
 }
 
-static int check_trust(X509_STORE_CTX *ctx)
+X509 *
+x509_vfy_lookup_cert_match(X509_STORE_CTX *ctx, X509 *x)
+{
+	if (ctx->lookup_certs == NULL || ctx->ctx == NULL ||
+	    ctx->ctx->objs == NULL)
+		return NULL;
+	return lookup_cert_match(ctx, x);
+}
+
+static int
+check_trust(X509_STORE_CTX *ctx)
 {
 	size_t i;
 	int ok;
@@ -991,7 +959,8 @@ static int check_trust(X509_STORE_CTX *ctx)
 	return X509_TRUST_UNTRUSTED;
 }
 
-int x509_vfy_check_trust(X509_STORE_CTX *ctx)
+int
+x509_vfy_check_trust(X509_STORE_CTX *ctx)
 {
 	return check_trust(ctx);
 }
@@ -1794,6 +1763,11 @@ x509_vfy_check_policy(X509_STORE_CTX *ctx)
 
 	if (ctx->parent)
 		return 1;
+
+	/* X509_policy_check always allocates a new tree. */
+	X509_policy_tree_free(ctx->tree);
+	ctx->tree = NULL;
+
 	ret = X509_policy_check(&ctx->tree, &ctx->explicit_policy, ctx->chain,
 	    ctx->param->policies, ctx->param->flags);
 	if (ret == 0) {
@@ -1905,7 +1879,7 @@ x509_check_cert_time(X509_STORE_CTX *ctx, X509 *x, int depth)
 }
 
 static int
-internal_verify(X509_STORE_CTX *ctx)
+x509_vfy_internal_verify(X509_STORE_CTX *ctx, int chain_verified)
 {
 	int n = sk_X509_num(ctx->chain) - 1;
 	X509 *xi = sk_X509_value(ctx->chain, n);
@@ -1941,8 +1915,8 @@ internal_verify(X509_STORE_CTX *ctx)
 		 * certificate and its depth (rather than the depth of
 		 * the subject).
 		 */
-		if (xs != xi ||
-		    (ctx->param->flags & X509_V_FLAG_CHECK_SS_SIGNATURE)) {
+		if (!chain_verified && ( xs != xi ||
+		    (ctx->param->flags & X509_V_FLAG_CHECK_SS_SIGNATURE))) {
 			EVP_PKEY *pkey;
 			if ((pkey = X509_get_pubkey(xi)) == NULL) {
 				if (!verify_cb_cert(ctx, xi, xi != xs ? n+1 : n,
@@ -1959,7 +1933,7 @@ internal_verify(X509_STORE_CTX *ctx)
 		}
 check_cert:
 		/* Calls verify callback as needed */
-		if (!x509_check_cert_time(ctx, xs, n))
+		if (!chain_verified && !x509_check_cert_time(ctx, xs, n))
 			return 0;
 
 		/*
@@ -1978,6 +1952,22 @@ check_cert:
 		}
 	}
 	return 1;
+}
+
+static int
+internal_verify(X509_STORE_CTX *ctx)
+{
+	return x509_vfy_internal_verify(ctx, 0);
+}
+
+/*
+ * Internal verify, but with a chain where the verification
+ * math has already been performed.
+ */
+int
+x509_vfy_callback_indicate_completion(X509_STORE_CTX *ctx)
+{
+	return x509_vfy_internal_verify(ctx, 1);
 }
 
 int
