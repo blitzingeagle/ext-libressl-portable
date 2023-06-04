@@ -1,4 +1,4 @@
-/* $OpenBSD: c_all.c,v 1.27 2022/01/14 08:38:05 tb Exp $ */
+/* $OpenBSD: c_all.c,v 1.29 2023/04/25 15:48:48 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -224,6 +224,9 @@ OpenSSL_add_all_ciphers_internal(void)
 #ifndef OPENSSL_NO_CHACHA
 	EVP_add_cipher(EVP_chacha20());
 #endif
+#if !defined(OPENSSL_NO_CHACHA) && !defined(OPENSSL_NO_POLY1305)
+	EVP_add_cipher(EVP_chacha20_poly1305());
+#endif
 
 #ifndef OPENSSL_NO_GOST
 	EVP_add_cipher(EVP_gost2814789_ecb());
@@ -287,6 +290,14 @@ OpenSSL_add_all_digests_internal(void)
 #ifndef OPENSSL_NO_SHA512
 	EVP_add_digest(EVP_sha384());
 	EVP_add_digest(EVP_sha512());
+	EVP_add_digest(EVP_sha512_224());
+	EVP_add_digest(EVP_sha512_256());
+#endif
+#ifndef OPENSSL_NO_SHA3
+	EVP_add_digest(EVP_sha3_224());
+	EVP_add_digest(EVP_sha3_256());
+	EVP_add_digest(EVP_sha3_384());
+	EVP_add_digest(EVP_sha3_512());
 #endif
 #ifndef OPENSSL_NO_SM3
 	EVP_add_digest(EVP_sm3());

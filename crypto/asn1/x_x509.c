@@ -1,4 +1,4 @@
-/* $OpenBSD: x_x509.c,v 1.30 2021/12/25 13:17:48 jsing Exp $ */
+/* $OpenBSD: x_x509.c,v 1.35 2023/04/28 16:30:14 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -65,7 +65,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
-#include "x509_lcl.h"
+#include "x509_local.h"
 
 static const ASN1_AUX X509_CINF_aux = {
 	.flags = ASN1_AFLG_ENCODING,
@@ -169,8 +169,6 @@ X509_CINF_free(X509_CINF *a)
 }
 /* X509 top level structure needs a bit of customisation */
 
-extern void policy_cache_free(X509_POLICY_CACHE *cache);
-
 static int
 x509_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it, void *exarg)
 {
@@ -205,7 +203,6 @@ x509_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it, void *exarg)
 		ASN1_OCTET_STRING_free(ret->skid);
 		AUTHORITY_KEYID_free(ret->akid);
 		CRL_DIST_POINTS_free(ret->crldp);
-		policy_cache_free(ret->policy_cache);
 		GENERAL_NAMES_free(ret->altname);
 		NAME_CONSTRAINTS_free(ret->nc);
 #ifndef OPENSSL_NO_RFC3779

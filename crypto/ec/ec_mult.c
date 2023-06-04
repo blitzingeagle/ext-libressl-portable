@@ -1,4 +1,4 @@
-/* $OpenBSD: ec_mult.c,v 1.24 2018/07/15 16:27:39 tb Exp $ */
+/* $OpenBSD: ec_mult.c,v 1.29 2023/04/11 18:58:20 jsing Exp $ */
 /*
  * Originally written by Bodo Moeller and Nils Larsch for the OpenSSL project.
  */
@@ -65,7 +65,7 @@
 
 #include <openssl/err.h>
 
-#include "ec_lcl.h"
+#include "ec_local.h"
 
 
 /*
@@ -98,7 +98,7 @@ static void ec_pre_comp_free(void *);
 static void ec_pre_comp_clear_free(void *);
 
 static EC_PRE_COMP *
-ec_pre_comp_new(const EC_GROUP * group)
+ec_pre_comp_new(const EC_GROUP *group)
 {
 	EC_PRE_COMP *ret = NULL;
 
@@ -132,7 +132,7 @@ ec_pre_comp_dup(void *src_)
 	return src_;
 }
 
-static void 
+static void
 ec_pre_comp_free(void *pre_)
 {
 	int i;
@@ -155,7 +155,7 @@ ec_pre_comp_free(void *pre_)
 	free(pre);
 }
 
-static void 
+static void
 ec_pre_comp_clear_free(void *pre_)
 {
 	int i;
@@ -172,7 +172,7 @@ ec_pre_comp_clear_free(void *pre_)
 		EC_POINT **p;
 
 		for (p = pre->points; *p != NULL; p++) {
-			EC_POINT_clear_free(*p);
+			EC_POINT_free(*p);
 			explicit_bzero(p, sizeof *p);
 		}
 		free(pre->points);
@@ -192,7 +192,7 @@ ec_pre_comp_clear_free(void *pre_)
  * w-1 zeros away from that next non-zero digit.
  */
 static signed char *
-compute_wNAF(const BIGNUM * scalar, int w, size_t * ret_len)
+compute_wNAF(const BIGNUM *scalar, int w, size_t *ret_len)
 {
 	int window_val;
 	int ok = 0;
@@ -331,11 +331,10 @@ compute_wNAF(const BIGNUM * scalar, int w, size_t * ret_len)
  *      scalar*generator
  * in the addition if scalar != NULL
  */
-int 
-ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
-    size_t num, const EC_POINT * points[], const BIGNUM * scalars[], BN_CTX * ctx)
+int
+ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
+    size_t num, const EC_POINT *points[], const BIGNUM *scalars[], BN_CTX *ctx)
 {
-	BN_CTX *new_ctx = NULL;
 	const EC_POINT *generator = NULL;
 	EC_POINT *tmp = NULL;
 	size_t totalnum;
@@ -375,11 +374,6 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 		}
 	}
 
-	if (ctx == NULL) {
-		ctx = new_ctx = BN_CTX_new();
-		if (ctx == NULL)
-			goto err;
-	}
 	if (scalar != NULL) {
 		generator = EC_GROUP_get0_generator(group);
 		if (generator == NULL) {
@@ -679,7 +673,6 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 	ret = 1;
 
  err:
-	BN_CTX_free(new_ctx);
 	EC_POINT_free(tmp);
 	free(wsize);
 	free(wNAF_len);
@@ -694,7 +687,7 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 	}
 	if (val != NULL) {
 		for (v = val; *v != NULL; v++)
-			EC_POINT_clear_free(*v);
+			EC_POINT_free(*v);
 		free(val);
 	}
 	free(val_sub);
@@ -721,12 +714,11 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
  * points[2^(w-1)*numblocks-1]     = (2^(w-1)) *  2^(blocksize*(numblocks-1)) * generator
  * points[2^(w-1)*numblocks]       = NULL
  */
-int 
-ec_wNAF_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
+int
+ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx)
 {
 	const EC_POINT *generator;
 	EC_POINT *tmp_point = NULL, *base = NULL, **var;
-	BN_CTX *new_ctx = NULL;
 	BIGNUM *order;
 	size_t i, bits, w, pre_points_per_block, blocksize, numblocks,
 	 num;
@@ -745,12 +737,9 @@ ec_wNAF_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 		ECerror(EC_R_UNDEFINED_GENERATOR);
 		goto err;
 	}
-	if (ctx == NULL) {
-		ctx = new_ctx = BN_CTX_new();
-		if (ctx == NULL)
-			goto err;
-	}
+
 	BN_CTX_start(ctx);
+
 	if ((order = BN_CTX_get(ctx)) == NULL)
 		goto err;
 
@@ -764,7 +753,7 @@ ec_wNAF_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 	/*
 	 * The following parameters mean we precompute (approximately) one
 	 * point per bit.
-	 * 
+	 *
 	 * TBD: The combination  8, 4  is perfect for 160 bits; for other bit
 	 * lengths, other parameter combinations might provide better
 	 * efficiency.
@@ -857,10 +846,9 @@ ec_wNAF_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 	pre_comp = NULL;
 
 	ret = 1;
+
  err:
-	if (ctx != NULL)
-		BN_CTX_end(ctx);
-	BN_CTX_free(new_ctx);
+	BN_CTX_end(ctx);
 	ec_pre_comp_free(pre_comp);
 	if (points) {
 		EC_POINT **p;
@@ -875,8 +863,8 @@ ec_wNAF_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 }
 
 
-int 
-ec_wNAF_have_precompute_mult(const EC_GROUP * group)
+int
+ec_wNAF_have_precompute_mult(const EC_GROUP *group)
 {
 	if (EC_EX_DATA_get_data(group->extra_data, ec_pre_comp_dup, ec_pre_comp_free, ec_pre_comp_clear_free) != NULL)
 		return 1;

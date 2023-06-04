@@ -1,4 +1,4 @@
-/* $OpenBSD: err.h,v 1.26 2021/11/24 01:12:43 beck Exp $ */
+/* $OpenBSD: err.h,v 1.29 2023/04/09 19:10:23 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -197,6 +197,7 @@ typedef struct err_state_st {
 #define ERR_LIB_JPAKE		49
 #define ERR_LIB_GOST		50
 #define ERR_LIB_CT		51
+#define ERR_LIB_KDF		52
 
 #define ERR_LIB_USER		128
 
@@ -236,6 +237,7 @@ typedef struct err_state_st {
 #define GOSTerr(f,r) ERR_PUT_error(ERR_LIB_GOST,(f),(r),__FILE__,__LINE__)
 #define SSLerr(f,r)  ERR_PUT_error(ERR_LIB_SSL,(f),(r),__FILE__,__LINE__)
 #define CTerr(f, r) ERR_PUT_error(ERR_LIB_CT,(f),(r),__FILE__,__LINE__)
+#define KDFerr(f, r) ERR_PUT_error(ERR_LIB_KDF,(f),(r),__FILE__,__LINE__)
 #endif
 
 #ifdef LIBRESSL_INTERNAL
@@ -273,6 +275,7 @@ typedef struct err_state_st {
 #define JPAKEerror(r) ERR_PUT_error(ERR_LIB_JPAKE,(0xfff),(r),__FILE__,__LINE__)
 #define GOSTerror(r) ERR_PUT_error(ERR_LIB_GOST,(0xfff),(r),__FILE__,__LINE__)
 #define CTerror(r) ERR_PUT_error(ERR_LIB_CT,(0xfff),(r),__FILE__,__LINE__)
+#define KDFerror(r) ERR_PUT_error(ERR_LIB_KDF,(0xfff),(r),__FILE__,__LINE__)
 #endif
 
 #define ERR_PACK(l,f,r)		(((((unsigned long)l)&0xffL)<<24L)| \
@@ -343,10 +346,10 @@ typedef struct err_state_st {
 #define	ERR_R_PASSED_NULL_PARAMETER		(3|ERR_R_FATAL)
 #define	ERR_R_INTERNAL_ERROR			(4|ERR_R_FATAL)
 #define	ERR_R_DISABLED				(5|ERR_R_FATAL)
+#define	ERR_R_INIT_FAIL				(6|ERR_R_FATAL)
 
 /* 99 is the maximum possible ERR_R_... code, higher values
  * are reserved for the individual libraries */
-
 
 typedef struct ERR_string_data_st {
 	unsigned long error;
@@ -392,9 +395,8 @@ void ERR_load_crypto_strings(void);
 void ERR_free_strings(void);
 
 void ERR_remove_thread_state(const CRYPTO_THREADID *tid);
-#ifndef OPENSSL_NO_DEPRECATED
-void ERR_remove_state(unsigned long pid); /* if zero we look it up */
-#endif
+/* Wrapped in OPENSSL_NO_DEPRECATED in 0.9.8. Still used in 2023. */
+void ERR_remove_state(unsigned long pid);
 ERR_STATE *ERR_get_state(void);
 
 #ifndef OPENSSL_NO_LHASH

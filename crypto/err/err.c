@@ -1,4 +1,4 @@
-/* $OpenBSD: err.c,v 1.48 2019/10/17 14:28:53 jsing Exp $ */
+/* $OpenBSD: err.c,v 1.52 2023/04/09 19:10:23 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -215,6 +215,7 @@ static ERR_STRING_DATA ERR_str_reasons[] = {
 	{ERR_R_PASSED_NULL_PARAMETER,		"passed a null parameter"},
 	{ERR_R_INTERNAL_ERROR,			"internal error"},
 	{ERR_R_DISABLED	,			"called a function that was disabled at compile-time"},
+	{ERR_R_INIT_FAIL,			"initialization failure"},
 
 	{0, NULL},
 };
@@ -579,6 +580,7 @@ build_SYS_str_reasons(void)
 	static char strerror_tab[NUM_SYS_STR_REASONS][LEN_SYS_STR_REASON];
 	int i;
 	static int init = 1;
+	int save_errno;
 
 	CRYPTO_r_lock(CRYPTO_LOCK_ERR);
 	if (!init) {
@@ -593,6 +595,8 @@ build_SYS_str_reasons(void)
 		return;
 	}
 
+	/* strerror(3) will set errno to EINVAL when i is an unknown errno. */
+	save_errno = errno;
 	for (i = 1; i <= NUM_SYS_STR_REASONS; i++) {
 		ERR_STRING_DATA *str = &SYS_str_reasons[i - 1];
 
@@ -609,6 +613,7 @@ build_SYS_str_reasons(void)
 		if (str->string == NULL)
 			str->string = "unknown";
 	}
+	errno = save_errno;
 
 	/* Now we still have SYS_str_reasons[NUM_SYS_STR_REASONS] = {0, NULL},
 	 * as required by ERR_load_strings. */
@@ -1035,13 +1040,11 @@ ERR_remove_thread_state(const CRYPTO_THREADID *id)
 	ERRFN(thread_del_item)(&tmp);
 }
 
-#ifndef OPENSSL_NO_DEPRECATED
 void
 ERR_remove_state(unsigned long pid)
 {
 	ERR_remove_thread_state(NULL);
 }
-#endif
 
 ERR_STATE *
 ERR_get_state(void)
@@ -1074,7 +1077,7 @@ ERR_get_state(void)
 			ERR_STATE_free(ret); /* could not insert it */
 			return (&fallback);
 		}
-		/* If a race occured in this function and we came second, tmpp
+		/* If a race occurred in this function and we came second, tmpp
 		 * is the first one that we just replaced. */
 		if (tmpp)
 			ERR_STATE_free(tmpp);

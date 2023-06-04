@@ -1,4 +1,4 @@
-/* $OpenBSD: rsa_eay.c,v 1.54 2022/01/20 11:10:11 inoguchi Exp $ */
+/* $OpenBSD: rsa_eay.c,v 1.60 2023/05/05 12:21:44 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -118,8 +118,8 @@
 #include <openssl/err.h>
 #include <openssl/rsa.h>
 
-#include "bn_lcl.h"
-#include "rsa_locl.h"
+#include "bn_local.h"
+#include "rsa_local.h"
 
 static int RSA_eay_public_encrypt(int flen, const unsigned char *from,
     unsigned char *to, RSA *rsa, int padding);
@@ -226,10 +226,11 @@ RSA_eay_public_encrypt(int flen, const unsigned char *from, unsigned char *to,
 		goto err;
 	}
 
-	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC)
+	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
 		if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
 		    CRYPTO_LOCK_RSA, rsa->n, ctx))
 			goto err;
+	}
 
 	if (!rsa->meth->bn_mod_exp(ret, f, rsa->e, rsa->n, ctx,
 	    rsa->_method_mod_n))
@@ -403,6 +404,12 @@ RSA_eay_private_encrypt(int flen, const unsigned char *from, unsigned char *to,
 		goto err;
 	}
 
+	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
+		if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
+		    CRYPTO_LOCK_RSA, rsa->n, ctx))
+			goto err;
+	}
+
 	if (!(rsa->flags & RSA_FLAG_NO_BLINDING)) {
 		blinding = rsa_get_blinding(rsa, &local_blinding, ctx);
 		if (blinding == NULL) {
@@ -430,11 +437,6 @@ RSA_eay_private_encrypt(int flen, const unsigned char *from, unsigned char *to,
 
 		BN_init(&d);
 		BN_with_flags(&d, rsa->d, BN_FLG_CONSTTIME);
-
-		if (rsa->flags & RSA_FLAG_CACHE_PUBLIC)
-			if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
-			    CRYPTO_LOCK_RSA, rsa->n, ctx))
-				goto err;
 
 		if (!rsa->meth->bn_mod_exp(ret, f, &d, rsa->n, ctx,
 		    rsa->_method_mod_n)) {
@@ -521,6 +523,12 @@ RSA_eay_private_decrypt(int flen, const unsigned char *from, unsigned char *to,
 		goto err;
 	}
 
+	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
+		if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
+		    CRYPTO_LOCK_RSA, rsa->n, ctx))
+			goto err;
+	}
+
 	if (!(rsa->flags & RSA_FLAG_NO_BLINDING)) {
 		blinding = rsa_get_blinding(rsa, &local_blinding, ctx);
 		if (blinding == NULL) {
@@ -549,11 +557,6 @@ RSA_eay_private_decrypt(int flen, const unsigned char *from, unsigned char *to,
 
 		BN_init(&d);
 		BN_with_flags(&d, rsa->d, BN_FLG_CONSTTIME);
-
-		if (rsa->flags & RSA_FLAG_CACHE_PUBLIC)
-			if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
-			    CRYPTO_LOCK_RSA, rsa->n, ctx))
-				goto err;
 
 		if (!rsa->meth->bn_mod_exp(ret, f, &d, rsa->n, ctx,
 		    rsa->_method_mod_n)) {
@@ -654,10 +657,11 @@ RSA_eay_public_decrypt(int flen, const unsigned char *from, unsigned char *to,
 		goto err;
 	}
 
-	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC)
+	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
 		if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
 		    CRYPTO_LOCK_RSA, rsa->n, ctx))
 			goto err;
+	}
 
 	if (!rsa->meth->bn_mod_exp(ret, f, rsa->e, rsa->n, ctx,
 	    rsa->_method_mod_n))
@@ -716,7 +720,7 @@ RSA_eay_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 		BIGNUM p, q;
 
 		/*
-		 * Make sure BN_mod_inverse in Montgomery intialization uses the
+		 * Make sure BN_mod_inverse in Montgomery initialization uses the
 		 * BN_FLG_CONSTTIME flag
 		 */
 		BN_init(&p);
@@ -734,10 +738,11 @@ RSA_eay_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 		}
 	}
 
-	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC)
+	if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
 		if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n,
 		    CRYPTO_LOCK_RSA, rsa->n, ctx))
 			goto err;
+	}
 
 	/* compute I mod q */
 	BN_init(&c);
