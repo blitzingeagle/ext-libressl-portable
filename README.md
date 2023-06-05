@@ -3,6 +3,7 @@ Built from https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-3.8.0.tar.gz
 Modifications:
 * Removed targets for apps, tests, install, uninstall.
 * Removed extra files like unneeded target sources, Makefiles, autoconf files.
+* Disabled endian.h check for iOS as it breaks build.
 
 ===
 
