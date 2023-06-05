@@ -1,4 +1,4 @@
-/* $OpenBSD: ecs_ossl.c,v 1.24 2022/04/07 17:37:25 tb Exp $ */
+/* $OpenBSD: ecs_ossl.c,v 1.33 2023/04/13 15:00:24 tb Exp $ */
 /*
  * Written by Nils Larsch for the OpenSSL project
  */
@@ -60,12 +60,14 @@
 
 #include <openssl/opensslconf.h>
 
-#include <openssl/err.h>
-#include <openssl/obj_mac.h>
 #include <openssl/bn.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/objects.h>
 
-#include "bn_lcl.h"
-#include "ecs_locl.h"
+#include "bn_local.h"
+#include "ec_local.h"
+#include "ecs_local.h"
 
 static int ecdsa_prepare_digest(const unsigned char *dgst, int dgst_len,
     BIGNUM *order, BIGNUM *ret);
@@ -118,14 +120,23 @@ ossl_ecdsa_sign(int type, const unsigned char *dgst, int dlen, unsigned char *si
     unsigned int *siglen, const BIGNUM *kinv, const BIGNUM *r, EC_KEY *eckey)
 {
 	ECDSA_SIG *s;
+	int outlen = 0;
+	int ret = 0;
 
 	if ((s = ECDSA_do_sign_ex(dgst, dlen, kinv, r, eckey)) == NULL) {
-		*siglen = 0;
-		return 0;
+		goto err;
 	}
-	*siglen = i2d_ECDSA_SIG(s, &sig);
+	if ((outlen = i2d_ECDSA_SIG(s, &sig)) < 0) {
+		outlen = 0;
+		goto err;
+	}
+
+	ret = 1;
+
+ err:
+	*siglen = outlen;
 	ECDSA_SIG_free(s);
-	return 1;
+	return ret;
 }
 
 static int
@@ -168,8 +179,13 @@ ecdsa_sign_setup(EC_KEY *eckey, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp)
 		goto err;
 	}
 
+	/* Reject curves with an order that is smaller than 80 bits. */
+	if ((order_bits = BN_num_bits(order)) < 80) {
+		ECDSAerror(EC_R_INVALID_GROUP_ORDER);
+		goto err;
+	}
+
 	/* Preallocate space. */
-	order_bits = BN_num_bits(order);
 	if (!BN_set_bit(k, order_bits) ||
 	    !BN_set_bit(r, order_bits) ||
 	    !BN_set_bit(X, order_bits))
@@ -195,12 +211,12 @@ ecdsa_sign_setup(EC_KEY *eckey, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp)
 		 * code path used in the constant time implementations
 		 * elsewhere.
 		 *
-		 * TODO: revisit the BN_copy aiming for a memory access agnostic
+		 * TODO: revisit the bn_copy aiming for a memory access agnostic
 		 * conditional copy.
 		 */
 		if (!BN_add(r, k, order) ||
 		    !BN_add(X, r, order) ||
-		    !BN_copy(k, BN_num_bits(r) > order_bits ? r : X))
+		    !bn_copy(k, BN_num_bits(r) > order_bits ? r : X))
 			goto err;
 
 		BN_set_flags(k, BN_FLG_CONSTTIME);
@@ -225,22 +241,22 @@ ecdsa_sign_setup(EC_KEY *eckey, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp)
 		ECDSAerror(ERR_R_BN_LIB);
 		goto err;
 	}
-	BN_clear_free(*rp);
-	BN_clear_free(*kinvp);
+	BN_free(*rp);
+	BN_free(*kinvp);
 	*rp = r;
 	*kinvp = k;
 	ret = 1;
 
  err:
 	if (ret == 0) {
-		BN_clear_free(k);
-		BN_clear_free(r);
+		BN_free(k);
+		BN_free(r);
 	}
 	if (ctx_in == NULL)
 		BN_CTX_free(ctx);
 	BN_free(order);
 	EC_POINT_free(point);
-	BN_clear_free(X);
+	BN_free(X);
 	return (ret);
 }
 
@@ -255,6 +271,14 @@ ossl_ecdsa_sign_setup(EC_KEY *eckey, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp
 	return ecdsa->meth->ecdsa_sign_setup(eckey, ctx_in, kinvp, rp);
 }
 
+
+/*
+ * It is too expensive to check curve parameters on every sign operation.
+ * Instead, cap the number of retries. A single retry is very unlikely, so
+ * allowing 32 retries is amply enough.
+ */
+#define ECDSA_MAX_SIGN_ITERATIONS		32
+
 static ECDSA_SIG *
 ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
     const BIGNUM *in_kinv, const BIGNUM *in_r, EC_KEY *eckey)
@@ -266,6 +290,7 @@ ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
 	const EC_GROUP *group;
 	ECDSA_SIG  *ret;
 	ECDSA_DATA *ecdsa;
+	int attempts = 0;
 	int ok = 0;
 
 	ecdsa = ecdsa_check(eckey);
@@ -308,7 +333,7 @@ ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
 			ckinv = kinv;
 		} else {
 			ckinv = in_kinv;
-			if (BN_copy(ret->r, in_r) == NULL) {
+			if (!bn_copy(ret->r, in_r)) {
 				ECDSAerror(ERR_R_MALLOC_FAILURE);
 				goto err;
 			}
@@ -380,6 +405,11 @@ ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
 				ECDSAerror(ECDSA_R_NEED_NEW_SETUP_VALUES);
 				goto err;
 			}
+
+			if (++attempts > ECDSA_MAX_SIGN_ITERATIONS) {
+				ECDSAerror(EC_R_WRONG_CURVE_PARAMETERS);
+				goto err;
+			}
 		} else
 			/* s != 0 => we have a valid signature */
 			break;
@@ -393,12 +423,12 @@ ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
 		ret = NULL;
 	}
 	BN_CTX_free(ctx);
-	BN_clear_free(b);
-	BN_clear_free(binv);
-	BN_clear_free(bm);
-	BN_clear_free(bxr);
-	BN_clear_free(kinv);
-	BN_clear_free(m);
+	BN_free(b);
+	BN_free(binv);
+	BN_free(bm);
+	BN_free(bxr);
+	BN_free(kinv);
+	BN_free(m);
 	BN_free(order);
 	BN_free(range);
 	return ret;
@@ -543,4 +573,67 @@ ossl_ecdsa_verify_sig(const unsigned char *dgst, int dgst_len,
 	if ((ecdsa = ecdsa_check(eckey)) == NULL)
 		return 0;
 	return ecdsa->meth->ecdsa_do_verify(dgst, dgst_len, sig, eckey);
+}
+
+ECDSA_SIG *
+ECDSA_do_sign(const unsigned char *dgst, int dlen, EC_KEY *eckey)
+{
+	return ECDSA_do_sign_ex(dgst, dlen, NULL, NULL, eckey);
+}
+
+ECDSA_SIG *
+ECDSA_do_sign_ex(const unsigned char *dgst, int dlen, const BIGNUM *kinv,
+    const BIGNUM *rp, EC_KEY *eckey)
+{
+	if (eckey->meth->sign_sig != NULL)
+		return eckey->meth->sign_sig(dgst, dlen, kinv, rp, eckey);
+	ECDSAerror(EVP_R_METHOD_NOT_SUPPORTED);
+	return 0;
+}
+
+int
+ECDSA_sign(int type, const unsigned char *dgst, int dlen, unsigned char *sig,
+    unsigned int *siglen, EC_KEY *eckey)
+{
+	return ECDSA_sign_ex(type, dgst, dlen, sig, siglen, NULL, NULL, eckey);
+}
+
+int
+ECDSA_sign_ex(int type, const unsigned char *dgst, int dlen, unsigned char *sig,
+    unsigned int *siglen, const BIGNUM *kinv, const BIGNUM *r, EC_KEY *eckey)
+{
+	if (eckey->meth->sign != NULL)
+		return eckey->meth->sign(type, dgst, dlen, sig, siglen, kinv, r, eckey);
+	ECDSAerror(EVP_R_METHOD_NOT_SUPPORTED);
+	return 0;
+}
+
+int
+ECDSA_sign_setup(EC_KEY *eckey, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp)
+{
+	if (eckey->meth->sign_setup != NULL)
+		return eckey->meth->sign_setup(eckey, ctx_in, kinvp, rp);
+	ECDSAerror(EVP_R_METHOD_NOT_SUPPORTED);
+	return 0;
+}
+
+int
+ECDSA_do_verify(const unsigned char *dgst, int dgst_len, const ECDSA_SIG *sig,
+    EC_KEY *eckey)
+{
+	if (eckey->meth->verify_sig != NULL)
+		return eckey->meth->verify_sig(dgst, dgst_len, sig, eckey);
+	ECDSAerror(EVP_R_METHOD_NOT_SUPPORTED);
+	return 0;
+}
+
+int
+ECDSA_verify(int type, const unsigned char *dgst, int dgst_len,
+    const unsigned char *sigbuf, int sig_len, EC_KEY *eckey)
+{
+	if (eckey->meth->verify != NULL)
+		return eckey->meth->verify(type, dgst, dgst_len,
+		    sigbuf, sig_len, eckey);
+	ECDSAerror(EVP_R_METHOD_NOT_SUPPORTED);
+	return 0;
 }

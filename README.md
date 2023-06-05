@@ -1,20 +1,21 @@
-Built from https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-3.5.2.tar.gz
+Built from https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-3.8.0.tar.gz
 
 Modifications:
-- Removed tests/mandocs/pkgconfig/scripts/apps/cmake_uninstall from both filesystem and CMakeLists.txt
-- Removed m4 configuration files + make build scripts
+* Removed targets for apps, tests, install, uninstall.
+* Removed extra files like unneeded target sources, Makefiles, autoconf files.
+* Disabled endian.h check for iOS as it breaks build.
 
 ===
 
 ![LibreSSL image](https://www.libressl.org/images/libressl.jpg)
 ## Official portable version of [LibreSSL](https://www.libressl.org) ##
 
-[![Linux Build Status](https://github.com/libressl-portable/portable/actions/workflows/linux_test.yml/badge.svg)](https://github.com/libressl-portable/portable/actions/workflows/linux_test.yml)
-[![macOS Build Status](https://github.com/libressl-portable/portable/actions/workflows/macos_test.yml/badge.svg)](https://github.com/libressl-portable/portable/actions/workflows/macos_test.yml)
-[![Android_Build Status](https://github.com/libressl-portable/portable/actions/workflows/android_test.yml/badge.svg)](https://github.com/libressl-portable/portable/actions/workflows/android_test.yml)
-[![Cross_Build Status](https://github.com/libressl-portable/portable/actions/workflows/cross_test.yml/badge.svg)](https://github.com/libressl-portable/portable/actions/workflows/cross_test.yml)
+[![Linux Build Status](https://github.com/libressl/portable/actions/workflows/linux_test.yml/badge.svg)](https://github.com/libressl/portable/actions/workflows/linux_test.yml)
+[![macOS Build Status](https://github.com/libressl/portable/actions/workflows/macos_test.yml/badge.svg)](https://github.com/libressl/portable/actions/workflows/macos_test.yml)
+[![Android_Build Status](https://github.com/libressl/portable/actions/workflows/android_test.yml/badge.svg)](https://github.com/libressl/portable/actions/workflows/android_test.yml)
+[![Cross_Build Status](https://github.com/libressl/portable/actions/workflows/cross_test.yml/badge.svg)](https://github.com/libressl/portable/actions/workflows/cross_test.yml)
 [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/libressl.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:libressl)
-[![ASan Status](https://github.com/libressl-portable/portable/actions/workflows/linux_test_asan.yml/badge.svg)](https://github.com/libressl-portable/portable/actions/workflows/linux_test_asan.yml)
+[![ASan Status](https://github.com/libressl/portable/actions/workflows/linux_test_asan.yml/badge.svg)](https://github.com/libressl/portable/actions/workflows/linux_test_asan.yml)
 
 LibreSSL is a fork of [OpenSSL](https://www.openssl.org) 1.0.1g developed by the
 [OpenBSD](https://www.openbsd.org) project.  Our goal is to modernize the codebase,
@@ -22,9 +23,12 @@ improve security, and apply best practice development processes from OpenBSD.
 
 ## Compatibility with OpenSSL: ##
 
-LibreSSL is API compatible with OpenSSL 1.0.1, but does not yet include all
-new APIs from OpenSSL 1.0.2 and later. LibreSSL also includes APIs not yet
-present in OpenSSL. The current common API subset is OpenSSL 1.0.1.
+LibreSSL provides much of the OpenSSL 1.1 API. The OpenSSL 3 API is not currently
+supported. Incompatibilities between the projects exist and are unavoidable since
+both evolve with different goals and priorities. Important incompatibilities will
+be addressed if possible and as long as they are not too detrimental to LibreSSL's
+goals of simplicity, security and sanity. We do not add new features, ciphers and
+API without a solid reason and require that new code be clean and of high quality.
 
 LibreSSL is not ABI compatible with any release of OpenSSL, or necessarily
 earlier releases of LibreSSL. You will need to relink your programs to
@@ -60,11 +64,11 @@ OpenBSD mirror in directory
 although we suggest that you use a [mirror](https://www.openbsd.org/ftp.html).
 
 The LibreSSL portable build framework is also
-[mirrored](https://github.com/libressl-portable/portable) in Github.
+[mirrored](https://github.com/libressl/portable) on GitHub.
 
 Please report bugs either to the public libressl@openbsd.org mailing list,
-or to the github
-[issue tracker](https://github.com/libressl-portable/portable/issues)
+or to the GitHub
+[issue tracker](https://github.com/libressl/portable/issues)
 
 Severe vulnerabilities or bugs requiring coordination with OpenSSL can be
 sent to the core team at libressl-security@openbsd.org.
@@ -155,12 +159,8 @@ into other projects or build by itself.
 
 | Option Name | Default | Description
 | ------------ | -----: | ------
-|  LIBRESSL_SKIP_INSTALL | OFF | allows skipping install() rules.  Can be specified from command line using <br>```-DLIBRESSL_SKIP_INSTALL=ON``` |
-|  LIBRESSL_APPS | ON | allows skipping application builds. Apps are required to run tests |
-|  LIBRESSL_TESTS | ON | allows skipping of tests. Tests are only available in static builds |
 |  BUILD_SHARED_LIBS | OFF | CMake option for building shared libraries. |
 |  ENABLE_ASM | ON | builds assembly optimized rules. |
-|  ENABLE_EXTRATESTS | OFF | Enable extra tests that may be unreliable on some platforms |
 |  ENABLE_NC | OFF | Enable installing TLS-enabled nc(1) |
 |  OPENSSLDIR | Blank | Set the default openssl directory.  Can be specified from command line using <br>```-DOPENSSLDIR=<dirname>``` |
 

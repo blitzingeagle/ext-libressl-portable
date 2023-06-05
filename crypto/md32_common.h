@@ -1,4 +1,4 @@
-/* $OpenBSD: md32_common.h,v 1.22 2016/11/04 13:56:04 miod Exp $ */
+/* $OpenBSD: md32_common.h,v 1.24 2023/04/12 04:54:15 jsing Exp $ */
 /* ====================================================================
  * Copyright (c) 1999-2007 The OpenSSL Project.  All rights reserved.
  *
@@ -111,6 +111,8 @@
 
 #include <openssl/opensslconf.h>
 
+#include "crypto_internal.h"
+
 #if !defined(DATA_ORDER_IS_BIG_ENDIAN) && !defined(DATA_ORDER_IS_LITTLE_ENDIAN)
 #error "DATA_ORDER must be defined!"
 #endif
@@ -139,15 +141,7 @@
 #error "HASH_BLOCK_DATA_ORDER must be defined!"
 #endif
 
-/*
- * This common idiom is recognized by the compiler and turned into a
- * CPU-specific intrinsic as appropriate. 
- * e.g. GCC optimizes to roll on amd64 at -O0
- */
-static inline uint32_t ROTATE(uint32_t a, uint32_t n)
-{
-	return (a<<n)|(a>>(32-n));
-}
+#define ROTATE(a, n)	crypto_rol_u32(a, n)
 
 #if defined(DATA_ORDER_IS_BIG_ENDIAN)
 
@@ -316,7 +310,7 @@ int HASH_FINAL (unsigned char *md, HASH_CTX *c)
 #if defined(__alpha) || defined(__sparcv9) || defined(__mips)
 #define MD32_REG_T long
 /*
- * This comment was originaly written for MD5, which is why it
+ * This comment was originally written for MD5, which is why it
  * discusses A-D. But it basically applies to all 32-bit digests,
  * which is why it was moved to common header file.
  *

@@ -1,4 +1,4 @@
-/* $OpenBSD: a_object.c,v 1.46 2022/04/10 12:42:33 inoguchi Exp $ */
+/* $OpenBSD: a_object.c,v 1.50 2023/05/23 11:51:12 tb Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -66,7 +66,7 @@
 #include <openssl/buffer.h>
 #include <openssl/objects.h>
 
-#include "asn1_locl.h"
+#include "asn1_local.h"
 
 const ASN1_ITEM ASN1_OBJECT_it = {
 	.itype = ASN1_ITYPE_PRIMITIVE,
@@ -433,6 +433,9 @@ i2t_ASN1_OBJECT_internal(const ASN1_OBJECT *aobj, char *buf, int buf_len, int no
 	if (buf_len > 0)
 		buf[0] = '\0';
 
+	if (aobj == NULL || aobj->data == NULL)
+		return 0;
+
 	if (!CBB_init(&cbb, 0))
 		goto err;
 	if (!i2t_ASN1_OBJECT_cbb(aobj, &cbb, no_name))
@@ -529,8 +532,13 @@ c2i_ASN1_OBJECT_cbs(ASN1_OBJECT **out_aobj, CBS *content)
 	size_t data_len;
 	CBS cbs;
 
-	if (out_aobj == NULL || *out_aobj != NULL)
+	if (out_aobj == NULL)
 		goto err;
+
+	if (*out_aobj != NULL) {
+		ASN1_OBJECT_free(*out_aobj);
+		*out_aobj = NULL;
+	}
 
 	/* Parse and validate OID encoding per X.690 8.19.2. */
 	CBS_dup(content, &cbs);
@@ -651,7 +659,7 @@ d2i_ASN1_OBJECT(ASN1_OBJECT **out_aobj, const unsigned char **pp, long length)
 	if (!c2i_ASN1_OBJECT_cbs(&aobj, &content))
 		return NULL;
 
-	*pp = CBS_data(&content);
+	*pp = CBS_data(&cbs);
 
 	if (out_aobj != NULL)
 		*out_aobj = aobj;

@@ -1,4 +1,4 @@
-/* $OpenBSD: tasn_prn.c,v 1.22 2021/12/03 17:10:49 jsing Exp $ */
+/* $OpenBSD: tasn_prn.c,v 1.24 2023/04/17 08:43:16 tb Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 2000.
  */
@@ -65,21 +65,16 @@
 #include <openssl/objects.h>
 #include <openssl/x509v3.h>
 
-#include "asn1_locl.h"
+#include "asn1_local.h"
 
 /* Print routines.
  */
 
 /* ASN1_PCTX routines */
 
-ASN1_PCTX default_pctx = {
-	ASN1_PCTX_FLAGS_SHOW_ABSENT,	/* flags */
-	0,				/* nm_flags */
-	0,				/* cert_flags */
-	0,				/* oid_flags */
-	0				/* str_flags */
+static const ASN1_PCTX default_pctx = {
+	.flags = ASN1_PCTX_FLAGS_SHOW_ABSENT,
 };
-
 
 ASN1_PCTX *
 ASN1_PCTX_new(void)

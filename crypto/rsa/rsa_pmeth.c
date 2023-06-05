@@ -1,4 +1,4 @@
-/* $OpenBSD: rsa_pmeth.c,v 1.33 2021/12/04 16:08:32 tb Exp $ */
+/* $OpenBSD: rsa_pmeth.c,v 1.38 2023/05/05 12:21:44 tb Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 2006.
  */
@@ -70,9 +70,9 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
-#include "bn_lcl.h"
-#include "evp_locl.h"
-#include "rsa_locl.h"
+#include "bn_local.h"
+#include "evp_local.h"
+#include "rsa_local.h"
 
 /* RSA pkey context structure */
 
@@ -326,12 +326,16 @@ pkey_rsa_verify(EVP_PKEY_CTX *ctx, const unsigned char *sig, size_t siglen,
 			return -1;
 		}
 	} else {
+		int ret;
+
 		if (!setup_tbuf(rctx, ctx))
 			return -1;
-		rslen = RSA_public_decrypt(siglen, sig, rctx->tbuf, rsa,
-		    rctx->pad_mode);
-		if (rslen == 0)
+
+		if ((ret = RSA_public_decrypt(siglen, sig, rctx->tbuf, rsa,
+		    rctx->pad_mode)) <= 0)
 			return 0;
+
+		rslen = ret;
 	}
 
 	if (rslen != tbslen || timingsafe_bcmp(tbs, rctx->tbuf, rslen))
@@ -412,12 +416,19 @@ check_padding_md(const EVP_MD *md, int padding)
 		}
 	} else {
 		/* List of all supported RSA digests. */
+		/* RFC 8017 and NIST CSOR. */
 		switch(EVP_MD_type(md)) {
 		case NID_sha1:
 		case NID_sha224:
 		case NID_sha256:
 		case NID_sha384:
 		case NID_sha512:
+		case NID_sha512_224:
+		case NID_sha512_256:
+		case NID_sha3_224:
+		case NID_sha3_256:
+		case NID_sha3_384:
+		case NID_sha3_512:
 		case NID_md5:
 		case NID_md5_sha1:
 		case NID_md4:

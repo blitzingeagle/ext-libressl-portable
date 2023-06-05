@@ -48,7 +48,7 @@ target_include_directories(tls_obj
 		../include)
 
 add_library(tls $<TARGET_OBJECTS:tls_obj> $<TARGET_OBJECTS:ssl_obj>
-	$<TARGET_OBJECTS:crypto_obj>)
+	$<TARGET_OBJECTS:crypto_obj> empty.c)
 
 export_symbol(tls ${CMAKE_CURRENT_BINARY_DIR}/tls.sym)
 target_link_libraries(tls ${PLATFORM_LIBS})
@@ -60,15 +60,6 @@ set_target_properties(tls PROPERTIES
 	ARCHIVE_OUTPUT_NAME tls${TLS_POSTFIX})
 set_target_properties(tls PROPERTIES VERSION ${TLS_VERSION}
 	SOVERSION ${TLS_MAJOR_VERSION})
-
-if(ENABLE_LIBRESSL_INSTALL)
-	install(
-		TARGETS tls
-		ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-		LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-		RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-	)
-endif(ENABLE_LIBRESSL_INSTALL)
 
 # build static library for regression test
 if(BUILD_SHARED_LIBS)
